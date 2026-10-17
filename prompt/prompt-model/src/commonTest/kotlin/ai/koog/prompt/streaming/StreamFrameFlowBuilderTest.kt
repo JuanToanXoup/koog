@@ -51,6 +51,44 @@ class StreamFrameFlowBuilderTest {
     }
 
     @Test
+    fun testReasoningSignatureIsEmittedOnReasoningComplete() = runTest {
+        val frames = buildStreamFrameFlow {
+            emitReasoningDelta(text = "Thinking...", index = 0)
+            setPendingReasoningEncrypted(encrypted = "sig-part-1", index = 0)
+            setPendingReasoningEncrypted(encrypted = "sig-part-2", index = 0)
+            emitTextDelta("Answer", 1)
+            emitEnd()
+        }.toList()
+
+        assertContentEquals(
+            listOf(
+                StreamFrame.ReasoningDelta(text = "Thinking...", index = 0),
+                StreamFrame.ReasoningComplete(id = null, content = listOf("Thinking..."), encrypted = "sig-part-1sig-part-2", index = 0),
+                StreamFrame.TextDelta("Answer", 1),
+                StreamFrame.TextComplete("Answer", 1),
+                StreamFrame.End(null, ResponseMetaInfo.Empty)
+            ),
+            frames
+        )
+    }
+
+    @Test
+    fun testReasoningSignatureWithoutTextCompletesAnEmptySignedBlock() = runTest {
+        val frames = buildStreamFrameFlow {
+            setPendingReasoningEncrypted(encrypted = "sig", index = 0)
+            emitEnd()
+        }.toList()
+
+        assertContentEquals(
+            listOf(
+                StreamFrame.ReasoningComplete(id = null, content = emptyList(), encrypted = "sig", index = 0),
+                StreamFrame.End(null, ResponseMetaInfo.Empty)
+            ),
+            frames
+        )
+    }
+
+    @Test
     fun testEmitReasoningSummaryDelta() = runTest {
         val frames = buildStreamFrameFlow {
             emitReasoningDelta(summary = "Summary part 1", index = 0)

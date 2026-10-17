@@ -630,6 +630,8 @@ public data class AnthropicStreamDelta(
     val partialJson: String? = null,
     val stopReason: String? = null,
     val thinking: String? = null,
+    /** Signature of a thinking block, delivered by a `signature_delta` after its `thinking_delta`s. */
+    val signature: String? = null,
     val toolUse: AnthropicContent.ToolUse? = null
 )
 
@@ -662,6 +664,7 @@ public enum class AnthropicStreamDeltaContentType(public val value: String) {
     TEXT_DELTA("text_delta"),
     INPUT_JSON_DELTA("input_json_delta"),
     THINKING_DELTA("thinking_delta"),
+    SIGNATURE_DELTA("signature_delta"),
 }
 
 /**

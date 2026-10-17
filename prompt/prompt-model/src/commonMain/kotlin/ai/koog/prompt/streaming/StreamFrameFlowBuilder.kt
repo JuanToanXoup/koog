@@ -172,6 +172,24 @@ public class StreamFrameFlowBuilder(
     }
 
     /**
+     * Attaches an [encrypted] signature to the pending reasoning block, as providers that sign their
+     * reasoning do after the reasoning text (for example Anthropic's `signature_delta`). The signature is
+     * emitted on the [StreamFrame.ReasoningComplete] so the reasoning part can be sent back to the provider.
+     * Consecutive calls for the same block are concatenated. When no reasoning block is pending, one with
+     * no text is started so a signed, empty block is still completed.
+     */
+    public fun setPendingReasoningEncrypted(encrypted: String, id: String? = null, index: Int? = null) {
+        val previous: PendingReasoning? = pendingReasoningRef.load()
+        if (previous == null) {
+            pendingReasoningRef.store(
+                PendingReasoning(id = id, textDelta = null, summaryDelta = null, index = index, encrypted = encrypted)
+            )
+        } else {
+            pendingReasoningRef.store(previous.copy(encrypted = (previous.encrypted ?: "") + encrypted))
+        }
+    }
+
+    /**
      * Emits a [StreamFrame.End] with the given [finishReason].
      */
     public suspend fun emitEnd(finishReason: String? = null, metaInfo: ResponseMetaInfo? = null) {
@@ -245,6 +263,7 @@ public class StreamFrameFlowBuilder(
                 id = pendingReasoning.id,
                 text = pendingReasoning.textDelta?.let { listOf(pendingReasoning.textDelta) } ?: emptyList(),
                 summary = pendingReasoning.summaryDelta?.let { listOf(pendingReasoning.summaryDelta) },
+                encrypted = pendingReasoning.encrypted,
                 index = pendingReasoning.index
             )
         }
@@ -294,7 +313,8 @@ public class StreamFrameFlowBuilder(
         val id: String?,
         val textDelta: String?,
         val summaryDelta: String?,
-        val index: Int?
+        val index: Int?,
+        val encrypted: String? = null
     ) {
         fun appendDelta(id: String?, textDelta: String?, summaryDelta: String?, index: Int?): PendingReasoning {
             require(this.index == index)

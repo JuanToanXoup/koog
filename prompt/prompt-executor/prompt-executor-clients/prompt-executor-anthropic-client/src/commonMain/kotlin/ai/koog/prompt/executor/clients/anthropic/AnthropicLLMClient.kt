@@ -287,6 +287,16 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                                         )
                                     }
 
+                                    AnthropicStreamDeltaContentType.SIGNATURE_DELTA.value -> {
+                                        // The signature closes a thinking block; it must be echoed back with the
+                                        // block in later requests, so it rides on the ReasoningComplete frame.
+                                        setPendingReasoningEncrypted(
+                                            encrypted = delta.signature
+                                                ?: throw LLMClientException(clientName, "Signature delta is missing"),
+                                            index = response.index
+                                        )
+                                    }
+
                                     else -> {
                                         logger.warn { "Unknown Anthropic stream delta type: ${delta.type}" }
                                     }
