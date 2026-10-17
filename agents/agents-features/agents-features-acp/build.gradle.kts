@@ -25,6 +25,14 @@ kotlin {
                 api(libs.acp)
             }
         }
+
+        jvmTest {
+            dependencies {
+                implementation(kotlin("test-junit5"))
+                implementation(project(":agents:agents-test"))
+                implementation(libs.kotlinx.coroutines.test)
+            }
+        }
     }
 
     explicitApi()

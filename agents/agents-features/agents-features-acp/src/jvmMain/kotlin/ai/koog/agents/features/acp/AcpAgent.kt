@@ -27,6 +27,7 @@ import com.agentclientprotocol.model.ToolCallStatus
 import com.agentclientprotocol.protocol.Protocol
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.channels.ProducerScope
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.InvocationKind
 import kotlin.contracts.contract
@@ -80,6 +81,12 @@ public class AcpAgent(
     public suspend fun sendEvent(event: Event) {
         eventsProducer.send(event)
     }
+
+    /**
+     * Ids of the tool calls already announced to the client with a `tool_call` update. ACP announces
+     * each call once; later changes to it are `tool_call_update`s.
+     */
+    private val announcedToolCalls: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /**
      * Companion object, handling [AcpAgent] feature creation and installation.
@@ -225,6 +232,7 @@ public class AcpAgent(
 
             pipeline.interceptLLMCallCompleted(this@Feature) { ctx ->
                 ctx.response?.toAcpEvents(ctx.tools)?.forEach { event ->
+                    (event.update as? SessionUpdate.ToolCall)?.let { announcedToolCalls += it.toolCallId.value }
                     logger.debug { "Emitting event $event for LLM Call Completed" }
                     sendEvent(event)
                 }
@@ -232,17 +240,27 @@ public class AcpAgent(
 
             pipeline.interceptToolCallStarting(this@Feature) { ctx ->
                 logger.debug { "Emitting SessionUpdateEvent for ToolCall Starting" }
-                sendEvent(
-                    Event.SessionUpdateEvent(
-                        update = SessionUpdate.ToolCall(
-                            toolCallId = ToolCallId(ctx.toolCallId ?: UNKNOWN_TOOL_CALL_ID),
-                            title = ctx.toolDescription ?: UNKNOWN_TOOL_DESCRIPTION,
-                            // TODO: Support kind for tools
-                            status = ToolCallStatus.IN_PROGRESS,
-                            rawInput = ctx.toolArgs.toKotlinxJsonObject(),
-                        )
+                val toolCallId = ToolCallId(ctx.toolCallId ?: UNKNOWN_TOOL_CALL_ID)
+                val title = ctx.toolDescription ?: UNKNOWN_TOOL_DESCRIPTION
+                val rawInput = ctx.toolArgs.toKotlinxJsonObject()
+                // A call the model's response already announced is updated, not announced again.
+                val update = if (announcedToolCalls.add(toolCallId.value)) {
+                    SessionUpdate.ToolCall(
+                        toolCallId = toolCallId,
+                        title = title,
+                        // TODO: Support kind for tools
+                        status = ToolCallStatus.IN_PROGRESS,
+                        rawInput = rawInput,
                     )
-                )
+                } else {
+                    SessionUpdate.ToolCallUpdate(
+                        toolCallId = toolCallId,
+                        title = title,
+                        status = ToolCallStatus.IN_PROGRESS,
+                        rawInput = rawInput,
+                    )
+                }
+                sendEvent(Event.SessionUpdateEvent(update = update))
             }
 
             pipeline.interceptToolCallFailed(this@Feature) { ctx ->

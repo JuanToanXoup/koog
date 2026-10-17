@@ -235,7 +235,8 @@ public fun Message.Assistant.toAcpEvents(tools: List<ToolDescriptor> = emptyList
         response.parts.forEach { part ->
             when (part) {
                 is MessagePart.Reasoning -> {
-                    part.content.forEach {
+                    // Blank chunks (a signed thinking block with no visible text) would show as empty thoughts.
+                    part.content.filter { it.isNotBlank() }.forEach {
                         add(
                             SessionUpdateEvent(
                                 update = SessionUpdate.AgentThoughtChunk(
@@ -262,11 +263,13 @@ public fun Message.Assistant.toAcpEvents(tools: List<ToolDescriptor> = emptyList
                 }
 
                 is MessagePart.Text -> {
-                    add(
-                        SessionUpdateEvent(
-                            update = AgentMessageChunk(ContentBlock.Text(part.text))
+                    if (part.text.isNotEmpty()) {
+                        add(
+                            SessionUpdateEvent(
+                                update = AgentMessageChunk(ContentBlock.Text(part.text))
+                            )
                         )
-                    )
+                    }
                 }
 
                 is MessagePart.Attachment -> {
