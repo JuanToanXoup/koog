@@ -193,20 +193,7 @@ public class OllamaClient @JvmOverloads constructor(
     ): Message.Assistant {
         require(model.provider == LLMProvider.Ollama) { "Model not supported by Ollama" }
 
-        val ollamaTools = if (tools.isNotEmpty()) {
-            tools.map {
-                OllamaToolDTO(
-                    type = "function",
-                    function = Definition(
-                        name = it.name,
-                        description = it.description,
-                        parameters = toolDescriptorConverter.generate(it)
-                    )
-                )
-            }
-        } else {
-            null
-        }
+        val ollamaTools = tools.toOllamaTools()
 
         val params = prompt.params.toOllamaChatParams()
 
@@ -288,6 +275,23 @@ public class OllamaClient @JvmOverloads constructor(
         )
     }
 
+    /** The tools of a chat request, streamed or not; null when the prompt has none. */
+    private fun List<ToolDescriptor>.toOllamaTools(): List<OllamaToolDTO>? =
+        if (isEmpty()) {
+            null
+        } else {
+            map {
+                OllamaToolDTO(
+                    type = "function",
+                    function = Definition(
+                        name = it.name,
+                        description = it.description,
+                        parameters = toolDescriptorConverter.generate(it)
+                    )
+                )
+            }
+        }
+
     override fun executeStreaming(
         prompt: Prompt,
         model: LLModel,
@@ -302,6 +306,7 @@ public class OllamaClient @JvmOverloads constructor(
             OllamaChatRequestDTO(
                 model = model.id,
                 messages = prompt.toOllamaChatMessages(model),
+                tools = tools.toOllamaTools(),
                 options = extractOllamaOptions(prompt, model),
                 stream = true,
                 additionalProperties = params.additionalProperties,
