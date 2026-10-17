@@ -412,13 +412,13 @@ public class LongTermMemory(
                 }
             }
 
-            // Augment prompt before streaming LLM call
+            // Augment prompt before streaming LLM call. Like the regular call above, this sets the context's
+            // prompt directly: streaming is usually started from inside a write session, and the context
+            // lock is not reentrant, so opening another write session here would deadlock.
             pipeline.interceptLLMStreamingStarting(this) { ctx ->
                 val augmentedPrompt = getAugmentedPromptOrNull(ctx.prompt, retrieval)
                 if (augmentedPrompt != null) {
-                    ctx.context.llm.writeSession {
-                        prompt = augmentedPrompt
-                    }
+                    ctx.context.llm.prompt = augmentedPrompt // TODO: switch to writeSession after the KG-688
                 }
             }
         }

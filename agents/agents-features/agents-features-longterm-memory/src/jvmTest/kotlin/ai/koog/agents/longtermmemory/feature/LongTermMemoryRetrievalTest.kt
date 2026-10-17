@@ -3,6 +3,7 @@ package ai.koog.agents.longtermmemory.feature
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.agent.entity.ToolSelectionStrategy
+import ai.koog.agents.core.dsl.builder.node
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.nodeLLMRequestStreaming
 import ai.koog.agents.core.dsl.extension.nodeLLMRequestWithoutTools
@@ -68,6 +69,19 @@ class LongTermMemoryRetrievalTest {
                     flow.toList().filterIsInstance<StreamFrame.TextDelta>().joinToString("") { it.text }
                 }
             )
+        }
+
+    // Streams inside the node's write session, the usual pattern for a custom streaming node.
+    private val streamingInSessionStrategy =
+        strategy<String, String>("retrieval-streaming-in-session-test", toolSelectionStrategy = ToolSelectionStrategy.NONE) {
+            val llmNode by node<String, String>("llm-node") { input ->
+                llm.writeSession {
+                    appendPrompt { user(input) }
+                    requestLLMStreaming().toList().filterIsInstance<StreamFrame.TextDelta>().joinToString("") { it.text }
+                }
+            }
+            edge(nodeStart forwardTo llmNode)
+            edge(llmNode forwardTo nodeFinish)
         }
 
     /**
@@ -493,5 +507,31 @@ class LongTermMemoryRetrievalTest {
         assertEquals(storageError, thrown.cause, "Original storage error should be preserved as cause")
         assertNotNull(thrown.message, "Exception should carry a message")
         assertFalse(llmCalled, "LLM must not be called when retrieval fails under FAIL_FAST policy")
+    }
+
+    @Test
+    @Timeout(5)
+    fun testStreamingInsideAWriteSessionIsAugmentedWithoutDeadlock() = runTest {
+        val storage = InMemoryRecordStorage()
+        storage.add(listOf(MemoryRecord(content = "Kotlin was developed by JetBrains")), defaultNamespace)
+
+        val executor = promptCapturingExecutor { content ->
+            if (content.contains("Kotlin was developed by JetBrains") && content.contains("Tell me about Kotlin")) "AUGMENTED" else "NOT_AUGMENTED"
+        }
+        val agent = AIAgent(
+            promptExecutor = executor,
+            strategy = streamingInSessionStrategy,
+            agentConfig = defaultAgentConfig,
+            toolRegistry = ToolRegistry.EMPTY
+        ) {
+            install(LongTermMemory.Feature) {
+                retrieval {
+                    this.storage = storage
+                    searchStrategy = SearchStrategy { _ -> KeywordSearchRequest(queryText = "Kotlin") }
+                }
+            }
+        }
+
+        assertEquals("AUGMENTED", agent.run("Tell me about Kotlin"))
     }
 }
