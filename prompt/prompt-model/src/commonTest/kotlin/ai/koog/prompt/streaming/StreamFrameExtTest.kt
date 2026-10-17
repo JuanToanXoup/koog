@@ -338,4 +338,16 @@ internal class StreamFrameExtTest {
 
         assertEquals(0, message.parts.size)
     }
+
+    @Test
+    fun testToolCallWithoutArgumentsBecomesEmptyArgs() {
+        val response = listOf(
+            StreamFrame.ToolCallComplete(id = "call-1", name = "get_time", content = "", index = 0),
+            StreamFrame.End(finishReason = "tool_use", metaInfo = ResponseMetaInfo.Empty),
+        ).toMessageResponse()
+
+        val call = response.parts.single() as MessagePart.Tool.Call
+        assertEquals("get_time", call.tool)
+        assertEquals(0, call.args.size)
+    }
 }

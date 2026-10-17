@@ -7,6 +7,7 @@ import ai.koog.prompt.message.MessagePart
 import ai.koog.prompt.message.ResponseMetaInfo
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlin.jvm.JvmName
 
@@ -105,7 +106,10 @@ public fun Iterable<StreamFrame>.toMessageResponse(): Message.Assistant {
                 MessagePart.Tool.Call(
                     id = frame.id,
                     tool = frame.name,
-                    args = Json.parseToJsonElement(frame.content).jsonObject,
+                    // Providers stream no input_json deltas for a tool without arguments, so the
+                    // accumulated content is empty; that is an empty object, not malformed JSON.
+                    args = frame.content.takeIf { it.isNotBlank() }?.let { Json.parseToJsonElement(it).jsonObject }
+                        ?: JsonObject(emptyMap()),
                 )
 
             is StreamFrame.End -> {
