@@ -4,6 +4,7 @@ package ai.koog.agents.ext.agent
 
 import ai.koog.agents.core.agent.entity.AIAgentGraphStrategy
 import ai.koog.agents.core.agent.entity.createStorageKey
+import ai.koog.agents.core.agent.session.AIAgentLLMWriteSession
 import ai.koog.agents.core.dsl.builder.node
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.ReceivedToolResults
@@ -14,8 +15,10 @@ import ai.koog.agents.core.dsl.extension.nodeSetStructuredOutput
 import ai.koog.agents.core.dsl.extension.onTextMessage
 import ai.koog.agents.core.dsl.extension.onToolCalls
 import ai.koog.prompt.executor.model.StructureFixingParser
+import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.MessagePart
+import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.structure.StructuredRequestConfig
 import kotlin.jvm.JvmName
 import kotlin.jvm.JvmOverloads
@@ -132,6 +135,14 @@ public fun reActStrategy(
     }
     val nodeCallLLM by node<Unit, Message.Assistant> {
         llm.writeSession {
+            // After a reasoning step the conversation ends with the model's own message. Many models
+            // reject that (assistant prefill is not supported by newer Claude models) or answer it with
+            // nothing (Ollama chat templates), so the action request gets a user turn to answer.
+            if (prompt.messages.lastOrNull() is Message.Assistant) {
+                appendPrompt {
+                    user(REACT_ACTION_PROMPT)
+                }
+            }
             requestLLM()
         }
     }
@@ -144,7 +155,7 @@ public fun reActStrategy(
                 user(reasoningPrompt)
             }
 
-            requestLLMWithoutTools()
+            requestReasoning()
         }
     }
     val nodeCallLLMReason by node<ReceivedToolResults, Unit> { results ->
@@ -162,7 +173,7 @@ public fun reActStrategy(
                 appendPrompt {
                     user(reasoningPrompt)
                 }
-                requestLLMWithoutTools()
+                requestReasoning()
             }
         }
         storage.set(reasoningStepKey, reasoningStep + 1)
@@ -175,6 +186,27 @@ public fun reActStrategy(
     edge(nodeCallLLM forwardTo nodeFinish onTextMessage { true })
     edge(nodeExecuteTools forwardTo nodeCallLLMReason)
     edge(nodeCallLLMReason forwardTo nodeCallLLM)
+}
+
+/**
+ * User turn appended before a ReAct action request whose prompt ends with the model's reasoning.
+ */
+internal const val REACT_ACTION_PROMPT: String = "Now take the next step: call a tool, or give your final answer if you have it."
+
+/**
+ * Requests a ReAct reasoning step. Where the model supports tool choice, the agent's tools are sent
+ * with [LLMParams.ToolChoice.None], so the model plans with the tools it actually has but cannot call
+ * them yet; otherwise the request is made without tools, as before.
+ */
+private suspend fun AIAgentLLMWriteSession.requestReasoning(): Message.Assistant {
+    if (tools.isEmpty() || !model.supports(LLMCapability.ToolChoice)) return requestLLMWithoutTools()
+    val toolChoice = prompt.params.toolChoice
+    prompt = prompt.withUpdatedParams { this.toolChoice = LLMParams.ToolChoice.None }
+    try {
+        return requestLLM()
+    } finally {
+        prompt = prompt.withUpdatedParams { this.toolChoice = toolChoice }
+    }
 }
 
 /**
