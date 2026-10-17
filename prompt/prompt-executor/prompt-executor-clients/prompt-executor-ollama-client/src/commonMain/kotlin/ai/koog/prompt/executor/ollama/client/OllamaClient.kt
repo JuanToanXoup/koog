@@ -245,28 +245,27 @@ public class OllamaClient @JvmOverloads constructor(
         return parseResponse(ollamaJson.decodeFromString<OllamaChatResponseDTO>(responseBody))
     }
 
+    /** Token counts from a (final) response chunk; the total is whatever of prompt + response is known. */
+    private fun OllamaChatResponseDTO.toResponseMetaInfo(): ResponseMetaInfo {
+        val totalTokensCount = when {
+            promptEvalCount != null && evalCount != null -> promptEvalCount + evalCount
+            promptEvalCount != null -> promptEvalCount
+            evalCount != null -> evalCount
+            else -> null
+        }
+        return ResponseMetaInfo.create(
+            clock,
+            totalTokensCount = totalTokensCount,
+            inputTokensCount = promptEvalCount,
+            outputTokensCount = evalCount,
+        )
+    }
+
     private fun parseResponse(response: OllamaChatResponseDTO): Message.Assistant {
         val message = response.message
             ?: throw LLMClientException(clientName = clientName, message = "Missing message in Ollama response")
 
-        // Get token counts from the response, or use null if not available
-        val promptTokenCount = response.promptEvalCount
-        val responseTokenCount = response.evalCount
-
-        // Calculate total tokens (prompt + response) if both are available
-        val totalTokensCount = when {
-            promptTokenCount != null && responseTokenCount != null -> promptTokenCount + responseTokenCount
-            promptTokenCount != null -> promptTokenCount
-            responseTokenCount != null -> responseTokenCount
-            else -> null
-        }
-
-        val responseMetadata = ResponseMetaInfo.create(
-            clock,
-            totalTokensCount = totalTokensCount,
-            inputTokensCount = promptTokenCount,
-            outputTokensCount = responseTokenCount,
-        )
+        val responseMetadata = response.toResponseMetaInfo()
 
         return Message.Assistant(
             parts = buildList {
@@ -335,6 +334,12 @@ public class OllamaClient @JvmOverloads constructor(
                         )
                         tryEmitPendingToolCall()
                     }
+                }
+                // The final chunk closes the stream: it flushes the buffered text and reasoning into
+                // their Complete frames and carries the token counts, so that the frames assemble into
+                // the same Message.Assistant the non-streaming path returns.
+                if (chunk.done) {
+                    emitEnd(finishReason = chunk.doneReason, metaInfo = chunk.toResponseMetaInfo())
                 }
             } catch (_: Exception) {
                 // Skip malformed JSON lines
