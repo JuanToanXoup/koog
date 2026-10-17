@@ -348,6 +348,6 @@ internal class StreamFrameExtTest {
 
         val call = response.parts.single() as MessagePart.Tool.Call
         assertEquals("get_time", call.tool)
-        assertEquals(0, call.args.size)
+        assertEquals("{}", call.args)
     }
 }
