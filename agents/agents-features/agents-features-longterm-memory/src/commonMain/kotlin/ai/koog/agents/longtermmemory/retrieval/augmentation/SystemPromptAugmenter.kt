@@ -78,6 +78,16 @@ public class SystemPromptAugmenter(
         public fun build(): SystemPromptAugmenter = SystemPromptAugmenter(template, contextPrefix)
     }
 
+    /** Text before and after the context placeholder: every block this augmenter adds starts and ends with them. */
+    private val contextHead: String =
+        template.substringBefore(PromptAugmenter.RELEVANT_CONTEXT_PLACEHOLDER).trim().ifEmpty { contextPrefix.trim() }
+    private val contextTail: String = template.substringAfter(PromptAugmenter.RELEVANT_CONTEXT_PLACEHOLDER, "").trim()
+
+    private fun isAddedContext(text: String): Boolean {
+        val trimmed = text.trim()
+        return contextHead.isNotEmpty() && trimmed.startsWith(contextHead) && trimmed.endsWith(contextTail)
+    }
+
     override fun augment(originalPrompt: Prompt, relevantContext: List<SearchResult<TextDocument>>): Prompt {
         if (relevantContext.isEmpty()) return originalPrompt
         if (originalPrompt.messages.none { it is Message.System }) return originalPrompt
@@ -91,8 +101,11 @@ public class SystemPromptAugmenter(
             if (systemIndex < 0) return@withMessages messages
 
             val original = messages[systemIndex] as Message.System
+            // LongTermMemory keeps the augmented prompt in the session, so the next call would append its
+            // context next to this one. Each call replaces the context an earlier call added instead.
+            val kept = original.parts.filterIndexed { index, part -> index == 0 || !isAddedContext(part.text) }
             val updated = original.copy(
-                parts = original.parts + MessagePart.Text(formattedContext)
+                parts = kept + MessagePart.Text(formattedContext)
             )
             messages.toMutableList().also { it[systemIndex] = updated }
         }

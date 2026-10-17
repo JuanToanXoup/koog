@@ -203,4 +203,41 @@ class PromptAugmenterTest {
         val result = customAugmenter.augment(originalPrompt, searchResults("some context"))
         assertEquals(originalPrompt.messages.size, result.messages.size)
     }
+
+    @Test
+    fun testSystemPromptAugmenterReplacesContextAddedByAnEarlierCall() {
+        val originalPrompt = prompt("test") {
+            system("You are a helpful assistant")
+            user("What is Kotlin?")
+        }
+        val augmenter = SystemPromptAugmenter()
+
+        // LongTermMemory keeps each augmented prompt in the session; the next LLM call augments that one again.
+        val first = augmenter.augment(originalPrompt, searchResults("Kotlin was developed by JetBrains"))
+        val second = augmenter.augment(first, searchResults("Kotlin runs on the JVM"))
+
+        val parts = second.messages.single { it is Message.System }.parts.filterIsInstance<MessagePart.Text>()
+        assertEquals(2, parts.size)
+        assertEquals("You are a helpful assistant", parts[0].text)
+        assertTrue(parts[1].text.contains("Kotlin runs on the JVM"))
+        assertTrue(!parts[1].text.contains("Kotlin was developed by JetBrains"))
+    }
+
+    @Test
+    fun testSystemPromptAugmenterKeepsOtherSystemParts() {
+        val base = prompt("test") {
+            system("You are a helpful assistant")
+            user("What is Kotlin?")
+        }
+        // A system message with a second part of its own, which is not retrieved context.
+        val originalPrompt = base.withMessages { messages ->
+            messages.map { if (it is Message.System) it.copy(parts = it.parts + MessagePart.Text("Answer briefly.")) else it }
+        }
+
+        val augmented = SystemPromptAugmenter().augment(originalPrompt, searchResults("Kotlin was developed by JetBrains"))
+
+        val parts = augmented.messages.single { it is Message.System }.parts.filterIsInstance<MessagePart.Text>().map { it.text }
+        assertEquals(3, parts.size)
+        assertEquals(listOf("You are a helpful assistant", "Answer briefly."), parts.take(2))
+    }
 }
