@@ -33,7 +33,11 @@ internal fun Prompt.toOllamaChatMessages(model: LLModel): List<OllamaChatMessage
                 }
 
                 is Message.User -> {
-                    add(message.toOllamaTextChatMessage(model))
+                    // Tool results go out as `tool` messages below. A user message made only of them
+                    // would otherwise add an empty `user` turn between the call and its result.
+                    if (message.parts.any { it !is MessagePart.Tool.Result }) {
+                        add(message.toOllamaTextChatMessage(model))
+                    }
                     message.parts.filterIsInstance<MessagePart.Tool.Result>().forEach { part ->
                         add(
                             OllamaChatMessageDTO(
@@ -110,6 +114,8 @@ private fun Message.User.toOllamaTextChatMessage(model: LLModel): OllamaChatMess
                         else -> throw IllegalArgumentException("Unsupported attachment type: $part")
                     }
                 }
+
+                is MessagePart.Tool.Result -> Unit // sent as its own `tool` message
 
                 else -> {
                     logger.warn { "Skipping unsupported message part: $part" }
