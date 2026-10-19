@@ -394,12 +394,14 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                     }
                 }
 
+                // A message left with no content (it held only blank text) is dropped: the API
+                // rejects empty messages, and consecutive turns of one role are merged anyway.
                 is Message.User -> {
-                    messages.add(message.toAnthropicUserMessage(model))
+                    message.toAnthropicUserMessage(model).takeIf { it.content.isNotEmpty() }?.let(messages::add)
                 }
 
                 is Message.Assistant -> {
-                    messages.add(message.toAnthropicAssistantMessage(model))
+                    message.toAnthropicAssistantMessage(model).takeIf { it.content.isNotEmpty() }?.let(messages::add)
                 }
             }
         }
@@ -508,12 +510,16 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                     }
 
                     is MessagePart.Text -> {
-                        add(
-                            AnthropicContent.Text(
-                                text = it.text,
-                                cacheControl = it.cacheControl?.toAnthropicCacheControl()
+                        // The API rejects blank text blocks. A reply made only of thinking or tool
+                        // calls can carry one, and it would fail every later request of the conversation.
+                        if (it.text.isNotBlank()) {
+                            add(
+                                AnthropicContent.Text(
+                                    text = it.text,
+                                    cacheControl = it.cacheControl?.toAnthropicCacheControl()
+                                )
                             )
-                        )
+                        }
                     }
 
                     is MessagePart.Attachment -> {
@@ -543,12 +549,14 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         val listOfContent = buildList {
             parts.forEach { part ->
                 when (part) {
-                    is MessagePart.Text -> add(
-                        AnthropicContent.Text(
-                            part.text,
-                            cacheControl = part.cacheControl?.toAnthropicCacheControl()
+                    is MessagePart.Text -> if (part.text.isNotBlank()) {
+                        add(
+                            AnthropicContent.Text(
+                                part.text,
+                                cacheControl = part.cacheControl?.toAnthropicCacheControl()
+                            )
                         )
-                    )
+                    }
 
                     is MessagePart.Tool.Result -> {
                         require(model.supports(LLMCapability.Tools)) {
